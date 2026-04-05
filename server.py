@@ -270,6 +270,131 @@ class MCPServer:
                         "required": [],
                     },
                 },
+                {
+                    "name": "summarize_for_new_chat",
+                    "description": (
+                        "Generate a portable summary of the current conversation that the user can paste into a new chat "
+                        "to continue where they left off. Call this when the context is getting full and the user wants to "
+                        "start a new conversation without losing progress. Also call this proactively when check_context_usage "
+                        "shows >75% usage."
+                    ),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "conversation_summary": {
+                                "type": "string",
+                                "description": (
+                                    "A thorough summary of the entire conversation so far. Include: "
+                                    "1) The original goal/task the user is working on. "
+                                    "2) Key decisions made and why. "
+                                    "3) Current state of progress (what's done, what's left). "
+                                    "4) Any important code snippets, file paths, or configurations discussed. "
+                                    "5) Open questions or blockers. "
+                                    "Make this detailed enough that a new Claude instance can pick up seamlessly."
+                                ),
+                            },
+                            "key_files": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of file paths that were created or modified in this conversation.",
+                            },
+                            "current_task": {
+                                "type": "string",
+                                "description": "What the user is currently working on or what was about to happen next.",
+                            },
+                        },
+                        "required": ["conversation_summary"],
+                    },
+                },
+                {
+                    "name": "export_key_info",
+                    "description": (
+                        "Extract and organize the most important information from the conversation: "
+                        "decisions made, code snippets, action items, links, and configuration details. "
+                        "Produces a clean reference document the user can save. "
+                        "Call this when the user wants to save important info before compacting or starting a new chat."
+                    ),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "decisions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Key decisions made during the conversation and their rationale.",
+                            },
+                            "code_snippets": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "description": {"type": "string"},
+                                        "language": {"type": "string"},
+                                        "code": {"type": "string"},
+                                        "file_path": {"type": "string"},
+                                    },
+                                },
+                                "description": "Important code snippets from the conversation.",
+                            },
+                            "action_items": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Remaining action items or TODOs.",
+                            },
+                            "links_and_references": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Any URLs, documentation references, or external resources mentioned.",
+                            },
+                            "configuration": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Configuration details, environment variables, settings, etc.",
+                            },
+                        },
+                        "required": [],
+                    },
+                },
+                {
+                    "name": "suggest_compaction",
+                    "description": (
+                        "Analyze the conversation and suggest which parts could be compacted or dropped "
+                        "to free up context space without losing important information. "
+                        "Call this when the user wants to optimize their context usage or when usage is >75%."
+                    ),
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "message_categories": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "category": {"type": "string"},
+                                        "message_count": {"type": "number"},
+                                        "estimated_tokens": {"type": "number"},
+                                        "can_compact": {"type": "boolean"},
+                                        "reason": {"type": "string"},
+                                    },
+                                },
+                                "description": (
+                                    "Break down the conversation into categories like: "
+                                    "exploratory back-and-forth, error debugging, successful code, "
+                                    "setup/config, planning, etc. For each, estimate token count "
+                                    "and whether it can be safely compacted."
+                                ),
+                            },
+                            "total_estimated_tokens": {
+                                "type": "number",
+                                "description": "Total estimated tokens in the conversation.",
+                            },
+                            "potential_savings": {
+                                "type": "number",
+                                "description": "Estimated tokens that could be freed by compacting the suggested categories.",
+                            },
+                        },
+                        "required": ["message_categories"],
+                    },
+                },
             ]
         }
 
@@ -278,8 +403,16 @@ class MCPServer:
         tool_name = params.get("name")
         arguments = params.get("arguments", {})
 
-        if tool_name == "check_context_usage":
-            return self.check_context_usage(arguments)
+        tool_handlers = {
+            "check_context_usage": self.check_context_usage,
+            "summarize_for_new_chat": self.summarize_for_new_chat,
+            "export_key_info": self.export_key_info,
+            "suggest_compaction": self.suggest_compaction,
+        }
+
+        handler = tool_handlers.get(tool_name)
+        if handler:
+            return handler(arguments)
 
         return {
             "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}],
@@ -331,6 +464,170 @@ class MCPServer:
 
         bar = build_progress_bar(total_tokens, limit, model)
         return {"content": [{"type": "text", "text": bar}]}
+
+    def summarize_for_new_chat(self, args: dict) -> dict:
+        """Generate a portable summary to carry over into a new chat."""
+        summary = args.get("conversation_summary", "")
+        key_files = args.get("key_files", [])
+        current_task = args.get("current_task", "")
+
+        lines = []
+        lines.append("## Conversation Carry-Over Summary")
+        lines.append("")
+        lines.append("Copy everything below and paste it as your first message in a new chat:")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("**Continue from previous conversation:**")
+        lines.append("")
+        lines.append(summary)
+
+        if key_files:
+            lines.append("")
+            lines.append("**Key files involved:**")
+            for f in key_files:
+                lines.append(f"- `{f}`")
+
+        if current_task:
+            lines.append("")
+            lines.append(f"**Next step:** {current_task}")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+        lines.append("*Paste the above into a new Claude chat to continue where you left off.*")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+    def export_key_info(self, args: dict) -> dict:
+        """Export decisions, code, action items, and references from the conversation."""
+        decisions = args.get("decisions", [])
+        code_snippets = args.get("code_snippets", [])
+        action_items = args.get("action_items", [])
+        links = args.get("links_and_references", [])
+        config = args.get("configuration", [])
+
+        lines = []
+        lines.append("## Conversation Export")
+        lines.append("")
+
+        if decisions:
+            lines.append("### Decisions Made")
+            for i, d in enumerate(decisions, 1):
+                lines.append(f"{i}. {d}")
+            lines.append("")
+
+        if code_snippets:
+            lines.append("### Code Snippets")
+            for snippet in code_snippets:
+                desc = snippet.get("description", "")
+                lang = snippet.get("language", "")
+                code = snippet.get("code", "")
+                path = snippet.get("file_path", "")
+                if desc:
+                    lines.append(f"**{desc}**" + (f" (`{path}`)" if path else ""))
+                elif path:
+                    lines.append(f"**`{path}`**")
+                lines.append(f"```{lang}")
+                lines.append(code)
+                lines.append("```")
+                lines.append("")
+
+        if action_items:
+            lines.append("### Action Items")
+            for item in action_items:
+                lines.append(f"- [ ] {item}")
+            lines.append("")
+
+        if links:
+            lines.append("### References")
+            for link in links:
+                lines.append(f"- {link}")
+            lines.append("")
+
+        if config:
+            lines.append("### Configuration")
+            for c in config:
+                lines.append(f"- {c}")
+            lines.append("")
+
+        if not any([decisions, code_snippets, action_items, links, config]):
+            lines.append("No key information was provided to export.")
+            lines.append("Ask Claude to call this tool again with the conversation details filled in.")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+    def suggest_compaction(self, args: dict) -> dict:
+        """Suggest which conversation parts can be compacted to free context."""
+        categories = args.get("message_categories", [])
+        total_tokens = args.get("total_estimated_tokens", 0)
+        potential_savings = args.get("potential_savings", 0)
+
+        lines = []
+        lines.append("## Context Compaction Analysis")
+        lines.append("")
+
+        if not categories:
+            lines.append("No conversation breakdown was provided.")
+            lines.append("Ask Claude to analyze the conversation and call this tool again.")
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+        # Summary table
+        lines.append("| Category | Messages | ~Tokens | Compactable? | Notes |")
+        lines.append("|----------|----------|---------|--------------|-------|")
+
+        compactable_tokens = 0
+        keep_tokens = 0
+
+        for cat in categories:
+            name = cat.get("category", "Unknown")
+            count = cat.get("message_count", 0)
+            tokens = cat.get("estimated_tokens", 0)
+            can_compact = cat.get("can_compact", False)
+            reason = cat.get("reason", "")
+
+            status = "Yes" if can_compact else "No (keep)"
+            lines.append(f"| {name} | {count} | {format_tokens(tokens)} | {status} | {reason} |")
+
+            if can_compact:
+                compactable_tokens += tokens
+            else:
+                keep_tokens += tokens
+
+        lines.append("")
+        lines.append(f"**Total tokens:** {format_tokens(total_tokens)}")
+        if potential_savings > 0:
+            savings_pct = (potential_savings / total_tokens * 100) if total_tokens > 0 else 0
+            lines.append(f"**Potential savings:** {format_tokens(potential_savings)} tokens ({savings_pct:.0f}%)")
+        elif compactable_tokens > 0:
+            savings_pct = (compactable_tokens / total_tokens * 100) if total_tokens > 0 else 0
+            lines.append(f"**Potential savings:** {format_tokens(compactable_tokens)} tokens ({savings_pct:.0f}%)")
+
+        lines.append("")
+        lines.append("### Recommendations")
+        lines.append("")
+
+        if compactable_tokens > 0 or potential_savings > 0:
+            lines.append("**What to do:**")
+            lines.append("1. Use **\"summarize for new chat\"** to generate a carry-over summary")
+            lines.append("2. Start a new conversation and paste the summary")
+            lines.append("3. You'll have a fresh context window with all the important context preserved")
+            lines.append("")
+            lines.append("**What gets dropped (safely):**")
+            for cat in categories:
+                if cat.get("can_compact", False):
+                    lines.append(f"- {cat.get('category', '?')}: {cat.get('reason', 'can be summarized')}")
+        else:
+            lines.append("This conversation is efficiently using its context. No compaction needed yet.")
+
+        lines.append("")
+        lines.append("### Quick Tips to Save Context")
+        lines.append("- Avoid re-pasting large code blocks Claude has already seen")
+        lines.append("- Ask Claude to focus on specific sections instead of entire files")
+        lines.append("- Use short, direct prompts instead of lengthy explanations")
+        lines.append("- If debugging, share only the relevant error + surrounding code")
+
+        return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
     def _try_read_local_data(self) -> dict | None:
         """Try to read token usage from the Claude desktop app's local data."""

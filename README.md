@@ -1,12 +1,13 @@
-# Claude Context Window Usage — MCP Server
+# Claude Context Window Manager — MCP Server
 
-A lightweight MCP server that shows you how much of the context window has been used in your Claude desktop app conversations. Helps you know when to compact a chat or start a new one.
+A lightweight MCP server that tracks, manages, and optimizes context window usage in your Claude desktop app conversations. Know when to compact, get carry-over summaries, and never lose important info.
 
 **Zero risk** — read-only, doesn't modify the Claude app. Just adds a config entry.
 
-## What It Does
+## Tools
 
-When you ask Claude to "check my context usage", it calls the `check_context_usage` tool and shows you:
+### 1. Check Context Usage
+> "How full is this chat?"
 
 ```
 ## Context Window Usage 🟡
@@ -20,11 +21,26 @@ Status: Getting used
 ℹ️ This chat is about half full. You have room for more exchanges.
 ```
 
-The progress bar color tells you at a glance:
+Color-coded at a glance:
 - 🟢 **Green** (0-50%): Plenty of room
 - 🟡 **Yellow** (50-75%): Getting used
 - 🟠 **Orange** (75-90%): Consider compacting soon
 - 🔴 **Red** (90-100%): Chat is full — compact or start new
+
+### 2. Summarize for New Chat
+> "Summarize this chat so I can continue in a new one"
+
+Generates a portable summary you can paste into a fresh conversation — includes the goal, decisions made, current progress, key files, and next steps. No more "where was I?" when starting over.
+
+### 3. Export Key Info
+> "Export the important stuff from this chat"
+
+Extracts and organizes: decisions made, code snippets, action items, links, and configuration details into a clean reference doc you can save.
+
+### 4. Suggest Compaction
+> "What can I drop from this chat to free up space?"
+
+Analyzes the conversation and categorizes it (debugging, setup, planning, etc.), showing which parts can be safely dropped vs. what needs to be kept. Includes token estimates and savings.
 
 ## Install
 
@@ -49,12 +65,14 @@ Then restart Claude. The config entry is removed and everything is back to norma
 
 ## How It Works
 
-This is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that the Claude desktop app connects to natively. It provides a single tool — `check_context_usage` — that Claude calls when you ask about context usage.
+This is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that the Claude desktop app connects to natively. It provides 4 tools that Claude calls when you ask about context:
 
-The server:
-1. Accepts token count estimates from Claude (which has awareness of conversation length)
-2. Tries to read actual token data from the Claude app's local storage (if accessible)
-3. Returns a formatted progress bar with actionable advice
+| Tool | Trigger | What it does |
+|------|---------|-------------|
+| `check_context_usage` | "How full is this chat?" | Shows progress bar + advice |
+| `summarize_for_new_chat` | "Summarize for a new chat" | Generates carry-over summary |
+| `export_key_info` | "Export the important stuff" | Extracts decisions, code, TODOs |
+| `suggest_compaction` | "What can I drop?" | Analyzes what's safe to remove |
 
 ## Requirements
 
@@ -83,12 +101,16 @@ If you prefer to configure manually, add this to your Claude desktop config:
 
 ## Phrases That Trigger It
 
-Any of these will make Claude call the tool:
+**Check usage:**
 - "Check my context usage"
 - "How full is this chat?"
-- "Should I start a new conversation?"
-- "How much context is left?"
 - "Am I running out of context?"
+
+**Manage context:**
+- "Summarize this chat so I can continue in a new one"
+- "Export the important stuff from this conversation"
+- "What can I drop from this chat to free up space?"
+- "Help me compact this conversation"
 
 ## License
 
