@@ -1,63 +1,64 @@
 #!/usr/bin/env python3
 """
-Claude Context Bar — Uninstaller
+Uninstaller for the Claude Context Usage MCP Server.
 
-Removes the context bar injection from the Claude desktop app by deleting
-the extracted app/ directory. Electron will then fall back to the original
-unmodified app.asar.
+Removes the context-usage MCP server entry from the Claude desktop config.
 """
 
-import os
-import shutil
+import json
 import sys
-
-CLAUDE_APP_PATH = "/Applications/Claude.app"
-RESOURCES_DIR = os.path.join(CLAUDE_APP_PATH, "Contents", "Resources")
-EXTRACTED_DIR = os.path.join(RESOURCES_DIR, "app")
-INSTALL_MARKER = os.path.join(EXTRACTED_DIR, ".context_bar_installed")
+import os
+from pathlib import Path
 
 
-def main():
+def get_claude_config_path() -> Path:
+    """Get the path to the Claude desktop app's MCP config file."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    elif sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "Claude" / "claude_desktop_config.json"
+    else:
+        return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+
+def uninstall():
+    """Remove the context-usage MCP server from the Claude desktop config."""
+    config_path = get_claude_config_path()
+
     print("=" * 60)
-    print("Claude Context Bar — Uninstaller")
+    print("  Claude Context Usage — Uninstaller")
     print("=" * 60)
     print()
 
-    if not os.path.exists(EXTRACTED_DIR):
-        print("Nothing to uninstall — app/ directory does not exist.")
-        print("The Claude app is using its original app.asar.")
-        sys.exit(0)
+    if not config_path.exists():
+        print("  Config file not found. Nothing to uninstall.")
+        return
 
-    # Safety check: only remove if we installed it
-    if not os.path.exists(INSTALL_MARKER):
-        print(f"WARNING: {EXTRACTED_DIR} exists but was NOT created by our installer.")
-        print("This directory may contain important data.")
-        response = input("Remove it anyway? (y/N) ").strip().lower()
-        if response != "y":
-            print("Aborted.")
-            sys.exit(0)
-
-    print("Removing injected app/ directory...")
     try:
-        shutil.rmtree(EXTRACTED_DIR)
-        print("  Done.")
-    except PermissionError:
-        print("  ERROR: Permission denied. Try running with sudo:")
-        print(f"  sudo python3 {sys.argv[0]}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"  ERROR: {e}")
-        sys.exit(1)
+        config = json.loads(config_path.read_text())
+    except json.JSONDecodeError:
+        print("  ⚠ Config file is invalid JSON. Cannot uninstall automatically.")
+        print(f"  Please manually edit: {config_path}")
+        return
 
+    servers = config.get("mcpServers", {})
+    if "context-usage" not in servers:
+        print("  'context-usage' server not found in config. Nothing to uninstall.")
+        return
+
+    del servers["context-usage"]
+
+    # Clean up empty mcpServers key
+    if not servers:
+        del config["mcpServers"]
+
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+
+    print("  ✓ Removed 'context-usage' MCP server from config")
     print()
-    print("=" * 60)
-    print("Uninstall complete!")
+    print("  Restart the Claude desktop app to complete uninstall.")
     print()
-    print("Next steps:")
-    print("  1. Quit Claude desktop app completely (Cmd+Q)")
-    print("  2. Reopen Claude — it will use the original app.asar")
-    print("=" * 60)
 
 
 if __name__ == "__main__":
-    main()
+    uninstall()
